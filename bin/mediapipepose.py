@@ -34,7 +34,9 @@ def main():
     params = parameters.Parameters()
     
     if params.webui:
-        webui_thread = threading.Thread(target=webui.start_webui, args=(params,), daemon=True)
+        # Enable HTTPS if user might use phone camera (needed for Safari camera access)
+        use_https = True
+        webui_thread = threading.Thread(target=webui.start_webui, args=(params, use_https), daemon=True)
         webui_thread.start()
     else:
         print("INFO: WebUI disabled in parameters")

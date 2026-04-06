@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Camera Stream</title>
+    <style>
+        body {
+            margin: 0; padding: 20px;
+            background: #111; color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        video {
+            width: 100%; max-width: 640px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+        }
+        canvas { display: none; }
+        .status {
+            font-size: 1.2em; margin: 10px 0;
+            padding: 10px; border-radius: 5px;
+        }
+        .connected { background: #1a3a1a; color: #0f0; }
+        .disconnected { background: #3a1a1a; color: #f00; }
+        button {
+            font-size: 1.3em; padding: 15px 40px;
+            margin: 10px; border: none; border-radius: 8px;
+            cursor: pointer;
+        }
+        #startBtn { background: #0a0; color: #fff; }
+        #stopBtn { background: #a00; color: #fff; }
+        #flipBtn { background: #06a; color: #fff; }
+    </style>
+</head>
+<body>
+    <h1>📱 Phone Camera</h1>
+    <p>Point your phone at your body and prop it up across the room!</p>
+    <div>
+        <button id="startBtn" onclick="startCamera()">Start Camera</button>
+        <button id="stopBtn" onclick="stopCamera()" style="display:none;">Stop</button>
+        <button id="flipBtn" onclick="flipCamera()" style="display:none;">Flip Camera</button>
+    </div>
+    <br>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="status" class="status disconnected">Tap "Start Camera" and allow camera access</div>
+    <div id="fps">FPS: --</div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        const fpsDisplay = document.getElementById('fps');
+
+        let streaming = false;
+        let stream = null;
+        let facingMode = "environment";
+        let frameCount = 0;
+        let lastFpsTime = Date.now();
+        let sendInterval = null;
+
+        const TARGET_FPS = 24;
+        const JPEG_QUALITY = 0.7;
+
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: facingMode,
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+
+                video.srcObject = stream;
+                await video.play();
+
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+
+                streaming = true;
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('stopBtn').style.display = 'inline-block';
+                document.getElementById('flipBtn').style.display = 'inline-block';
+
+                status.textContent = 'Streaming to PC...';
+                status.className = 'status connected';
+
+                sendInterval = setInterval(sendFrame, 1000 / TARGET_FPS);
+
+            } catch (err) {
+                status.textContent = 'Camera access denied: ' + err.message;
+                status.className = 'status disconnected';
+                console.error('Camera error:', err);
+            }
+        }
+
+        function stopCamera() {
+            streaming = false;
+            if (sendInterval) {
+                clearInterval(sendInterval);
+                sendInterval = null;
+            }
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+                stream = null;
+            }
+            video.srcObject = null;
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('flipBtn').style.display = 'none';
+            status.textContent = 'Camera stopped.';
+            status.className = 'status disconnected';
+        }
+
+        async function flipCamera() {
+            facingMode = (facingMode === "environment") ? "user" : "environment";
+            stopCamera();
+            await startCamera();
+        }
+
+        async function sendFrame() {
+            if (!streaming || video.readyState < 2) return;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            canvas.toBlob(async (blob) => {
+                if (!blob || !streaming) return;
+                try {
+                    await fetch('/phone_camera_frame', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'image/jpeg' },
+                        body: blob
+                    });
+
+                    frameCount++;
+                    const now = Date.now();
+                    if (now - lastFpsTime >= 1000) {
+                        fpsDisplay.textContent = 'FPS: ' + frameCount;
+                        frameCount = 0;
+                        lastFpsTime = now;
+                    }
+                } catch (e) {
+                    status.textContent = 'Connection lost! Is MediaPipePose still running?';
+                    status.className = 'status disconnected';
+                }
+            }, 'image/jpeg', JPEG_QUALITY);
+        }
+    </script>
+</body>
+</html>
